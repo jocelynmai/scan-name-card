@@ -1,37 +1,333 @@
 <!DOCTYPE html>
-<html>
+<html lang="vi">
 <head>
-    <title>Công cụ quét Card Visit</title>
-</head>
-<body>
-
-    <h1>Công cụ quét Card Visit</h1>
-    <video id="video" width="640" height="480" autoplay></video>
-    <button id="snap">Chụp ảnh</button>
-    <canvas id="canvas" width="640" height="480" style="display:none;"></canvas>
-
-    <script>
-        // --- BẠN DÁN CODE JAVASCRIPT VÀO ĐÂY ---
-        const video = document.getElementById('video');
-        const canvas = document.getElementById('canvas');
-        const snap = document.getElementById('snap');
-        const context = canvas.getContext('2d');
-
-        // Yêu cầu quyền truy cập camera
-        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-            navigator.mediaDevices.getUserMedia({ video: true }).then(function(stream) {
-                video.srcObject = stream;
-                video.play();
-            });
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tool Scan Namecard</title>
+    <!-- Thư viện Tesseract.js để nhận dạng chữ viết -->
+    <script src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'></script>
+    <style>
+        :root {
+            --primary-color: #4285F4; /* Google Blue */
+            --secondary-color: #34A853; /* Google Green */
+            --light-gray: #f8f9fa;
+            --gray: #e9ecef;
+            --dark-gray: #6c757d;
         }
 
-        // Chụp ảnh khi nhấn nút
-        snap.addEventListener("click", function() {
-            console.log("Đã chụp ảnh!");
-            context.drawImage(video, 0, 0, 640, 480);
-            // Chúng ta sẽ xử lý ảnh này ở các bước sau
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: var(--light-gray);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding-bottom: 50px;
+        }
+
+        main {
+            width: 100%;
+            max-width: 800px;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        h1 { color: var(--dark-gray); text-align: center; }
+
+        /* Camera View */
+        #camera-view {
+            width: 100%;
+            background: black;
+            border-radius: 12px;
+            overflow: hidden;
+            position: relative;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        #video-element { width: 100%; height: auto; display: block; }
+        #framing-guide {
+            position: absolute;
+            top: 10%;
+            left: 5%;
+            width: 90%;
+            height: 80%;
+            border: 3px dashed rgba(255, 255, 255, 0.7);
+            box-sizing: border-box;
+            border-radius: 8px;
+        }
+
+        /* Confirmation View */
+        #confirmation-view {
+            display: none;
+            text-align: center;
+        }
+        #captured-image {
+            max-width: 100%;
+            border-radius: 8px;
+            border: 2px solid var(--gray);
+        }
+        .confirmation-buttons { margin-top: 15px; }
+
+        /* Buttons */
+        .action-button {
+            font-size: 1.2rem;
+            padding: 12px 25px;
+            margin: 20px 5px;
+            cursor: pointer;
+            border-radius: 8px;
+            border: none;
+            color: white;
+            font-weight: 500;
+            transition: background-color 0.2s, box-shadow 0.2s;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        #btn-scan { background-color: var(--primary-color); }
+        #btn-use { background-color: var(--secondary-color); }
+        #btn-retake { background-color: var(--dark-gray); }
+        #btn-view-sheet { background-color: #fbbc05; color: #444; } /* Google Yellow */
+        .action-button:hover { opacity: 0.9; }
+        .action-button:disabled { background-color: #ccc; cursor: not-allowed; }
+
+        /* Status & Results Table */
+        #status-text { text-align: center; margin: 15px; font-style: italic; color: var(--dark-gray); min-height: 20px; }
+        #results-container {
+            width: 100%;
+            margin-top: 30px;
+            display: none;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background-color: white;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        th, td {
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid var(--gray);
+        }
+        thead th {
+            background-color: var(--light-gray);
+            font-weight: 600;
+            color: #333;
+        }
+        tbody tr:last-child td { border-bottom: none; }
+    </style>
+</head>
+<body>
+    <main>
+        <h1>Scan Namecard</h1>
+
+        <!-- WORKFLOW STEP 1 & 2: Camera view and framing guide -->
+        <div id="camera-view">
+            <video id="video-element" autoplay playsinline></video>
+            <div id="framing-guide"></div>
+        </div>
+
+        <!-- WORKFLOW STEP 4: Confirmation screen -->
+        <div id="confirmation-view">
+            <h3>Dùng hình này để quét?</h3>
+            <img id="captured-image" src="" alt="Captured namecard">
+            <div class="confirmation-buttons">
+                <button id="btn-use" class="action-button">✅ Dùng hình</button>
+                <button id="btn-retake" class="action-button">🔄 Chụp lại</button>
+            </div>
+        </div>
+
+        <!-- WORKFLOW STEP 3: Scan Button -->
+        <div style="text-align: center;">
+            <button id="btn-scan" class="action-button">📷 Scan Namecard</button>
+        </div>
+
+        <p id="status-text"></p>
+
+        <!-- Preview Table & View Sheet Button -->
+        <div id="results-container">
+            <h2>Bản xem trước</h2>
+            <div style="text-align: right; margin-bottom: 10px;">
+                <!-- WORKFLOW STEP 5: View on Google Sheet Button -->
+                <button id="btn-view-sheet" class="action-button" style="font-size: 1rem; padding: 8px 15px;">Mở Google Sheet ↗️</button>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>STT</th>
+                        <th>Name</th>
+                        <th>Position</th>
+                        <th>Address</th>
+                        <th>Phone</th>
+                        <th>Email</th>
+                        <th>Website</th>
+                    </tr>
+                </thead>
+                <tbody id="results-tbody">
+                    <!-- Scanned data will be inserted here -->
+                </tbody>
+            </table>
+        </div>
+    </main>
+
+    <!-- Hidden canvas for processing -->
+    <canvas id="canvas" style="display:none;"></canvas>
+
+    <script>
+        // --- CONFIGURATION ---
+        const GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit"; // <--- THAY ID SHEET CỦA BẠN VÀO ĐÂY
+
+        // --- DOM ELEMENTS ---
+        const cameraView = document.getElementById('camera-view');
+        const confirmationView = document.getElementById('confirmation-view');
+        const video = document.getElementById('video-element');
+        const canvas = document.getElementById('canvas');
+        const btnScan = document.getElementById('btn-scan');
+        const btnUse = document.getElementById('btn-use');
+        const btnRetake = document.getElementById('btn-retake');
+        const btnViewSheet = document.getElementById('btn-view-sheet');
+        const capturedImage = document.getElementById('captured-image');
+        const statusText = document.getElementById('status-text');
+        const resultsContainer = document.getElementById('results-container');
+        const resultsTbody = document.getElementById('results-tbody');
+
+        let sttCounter = 1;
+        let tesseractWorker = null;
+
+        // --- FUNCTIONS ---
+
+        // 1. Initialize Camera
+        async function startCamera() {
+            try {
+                // Ưu tiên camera sau trên điện thoại
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+                video.srcObject = stream;
+            } catch (err) {
+                console.error("Lỗi camera sau, thử lại với camera trước:", err);
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ video: {} });
+                    video.srcObject = stream;
+                } catch (finalErr) {
+                    console.error("Không thể truy cập bất kỳ camera nào:", finalErr);
+                    statusText.textContent = "Lỗi: Không thể truy cập camera. Vui lòng cấp quyền và tải lại trang.";
+                    btnScan.disabled = true;
+                }
+            }
+        }
+
+        // Initialize Tesseract Worker
+        async function initializeTesseract() {
+            statusText.textContent = 'Đang tải model nhận dạng...';
+            tesseractWorker = await Tesseract.createWorker('vie+eng', 1, {
+                logger: m => {
+                    if (m.status === 'recognizing text') {
+                        statusText.textContent = `Đang quét... ${Math.round(m.progress * 100)}%`;
+                    }
+                }
+            });
+            statusText.textContent = 'Sẵn sàng để quét!';
+        }
+
+        // 3. Handle Scan Button Click
+        btnScan.addEventListener('click', () => {
+            // Thiết lập kích thước canvas bằng kích thước thật của video
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            // Chụp hình
+            canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+            const imageUrl = canvas.toDataURL('image/jpeg');
+            capturedImage.src = imageUrl;
+
+            // Chuyển sang màn hình xác nhận
+            cameraView.style.display = 'none';
+            btnScan.style.display = 'none';
+            confirmationView.style.display = 'block';
+        });
+
+        // 4. Handle Confirmation Buttons
+        btnRetake.addEventListener('click', () => {
+            // Quay lại màn hình camera
+            confirmationView.style.display = 'none';
+            cameraView.style.display = 'block';
+            btnScan.style.display = 'inline-block';
+        });
+
+        btnUse.addEventListener('click', async () => {
+            statusText.textContent = 'Đang chuẩn bị quét...';
+            btnUse.disabled = true;
+            btnRetake.disabled = true;
+
+            try {
+                const { data: { text } } = await tesseractWorker.recognize(canvas);
+                console.log("Văn bản gốc từ OCR:\n", text);
+                const info = extractInfo(text);
+                addResultToTable(info);
+
+                // --- GỬI LÊN GOOGLE SHEET (PHẦN NÀY VẪN CẦN LÀM RIÊNG) ---
+                console.log("Dữ liệu để gửi đi:", info);
+                // Bạn sẽ gọi hàm `gapi.client.sheets.spreadsheets.values.append` ở đây
+                
+                statusText.textContent = 'Quét thành công!';
+            } catch (err) {
+                console.error("Lỗi OCR:", err);
+                statusText.textContent = 'Lỗi! Không thể đọc được chữ trên ảnh.';
+            } finally {
+                // Quay lại màn hình camera để quét tiếp
+                btnUse.disabled = false;
+                btnRetake.disabled = false;
+                btnRetake.click();
+            }
+        });
+        
+        // 5. Handle View Sheet Button
+        btnViewSheet.addEventListener('click', () => {
+            if (GOOGLE_SHEET_URL.includes("YOUR_SHEET_ID")) {
+                alert("Vui lòng thay thế 'YOUR_SHEET_ID' trong code bằng ID thật của Google Sheet của bạn.");
+                return;
+            }
+            window.open(GOOGLE_SHEET_URL, '_blank');
+        });
+
+        // Helper: Extract info using Regex
+        function extractInfo(text) {
+            const phoneRegex = /(?:\+?84|0)(?:\s|\.)?\d{1,3}(?:\s|\.)?\d{3,4}(?:\s|\.)?\d{3,4}/g;
+            const emailRegex = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
+            const websiteRegex = /(?:https?:\/\/)?(?:www\.)?([a-zA-Z0-9-]+\.[a-zA-Z]{2,}(?:\.[a-zA-Z]{2,})?)/gi;
+            
+            const phones = text.match(phoneRegex) || [];
+            const emails = text.match(emailRegex) || [];
+            const websites = text.match(websiteRegex) || [];
+
+            return {
+                stt: sttCounter++,
+                name: '', // Tên, chức vụ, địa chỉ vẫn rất khó để nhận dạng chính xác
+                position: '',
+                address: '',
+                phone: phones.join(', ') || '',
+                email: emails[0] || '',
+                website: websites[0] || ''
+            };
+        }
+
+        // Helper: Add result to preview table
+        function addResultToTable(info) {
+            resultsContainer.style.display = 'block';
+            const row = resultsTbody.insertRow();
+            row.innerHTML = `
+                <td>${info.stt}</td>
+                <td>${info.name}</td>
+                <td>${info.position}</td>
+                <td>${info.address}</td>
+                <td>${info.phone}</td>
+                <td>${info.email}</td>
+                <td>${info.website}</td>
+            `;
+        }
+
+        // --- INITIALIZE ---
+        window.addEventListener('load', async () => {
+            await startCamera();
+            await initializeTesseract();
         });
     </script>
-
 </body>
 </html>
